@@ -246,6 +246,7 @@ kbd { font-family: var(--font-mono); font-size: 11px; border: 1px solid var(--ed
         <label class="check"><input id="misc" type="checkbox" checked> Include misc. categories</label>
         <label class="check"><input id="romhacks" type="checkbox"> Include ROM hacks and mods</label>
         <label class="check"><input id="fangames" type="checkbox"> Include fan games</label>
+        <label class="check"><input id="twitch" type="checkbox" checked> Include Twitch videos</label>
         <label class="check"><input id="showspencer" type="checkbox" checked> Show Spencer</label>
       </div>
     </details>
@@ -362,8 +363,13 @@ function parseVideo(raw) {
   }
   return null;
 }
-function runVideo(run) {
-  for (const l of run.videos?.links || []) { const v = parseVideo(l.uri || ''); if (v) return v; }
+// First playable link on a run. With Twitch turned off, only YouTube links count, so runs whose
+// only video is on Twitch are passed over like runs with no video.
+function runVideo(run, allowTwitch = true) {
+  for (const l of run.videos?.links || []) {
+    const v = parseVideo(l.uri || '');
+    if (v && (allowTwitch || v.kind === 'youtube')) return v;
+  }
   return null;
 }
 
@@ -398,6 +404,7 @@ const getBlockedSeries = () => (blockedSeries ||= loadBlockedSeries().catch(() =
 const gameSeries = (g) => (g.links || []).filter((l) => l.rel === 'series').map((l) => l.uri.split('/').pop());
 async function pickRun(pid, filter, count, includeMisc, onProgress) {
   let boards = 0;
+  const allowTwitch = $('twitch').checked;
   const tries = Math.min(30, Math.max(6, count * 2));
   for (let attempt = 0; attempt < tries; attempt++) {
     const g = (await api(`/games?platform=${pid}${filter}&max=1&offset=${randInt(count)}&embed=categories.variables`)).data[0];
@@ -421,15 +428,15 @@ async function pickRun(pid, filter, count, includeMisc, onProgress) {
       let lb;
       try { lb = (await api(`/leaderboards/${g.id}/category/${c.id}?platform=${pid}&top=100&embed=players${qs}`)).data; }
       catch (e) { if (e.status) continue; throw e; }
-      const runs = lb.runs.map((r) => ({ place: r.place, run: r.run, video: runVideo(r.run) }));
+      const runs = lb.runs.map((r) => ({ place: r.place, run: r.run, video: runVideo(r.run, allowTwitch) }));
       const cands = runs.filter((r) => r.video);
       if (!cands.length) continue;
       const people = new Map();
       for (const p of lb.players?.data || []) people.set(p.rel === 'guest' ? 'g:' + p.name : p.id, p);
-      return { game: g, category: c, subs, runs, cands, idx: 0, people, unavailable: [], skipped: [] };
+      return { game: g, category: c, subs, runs, cands, idx: 0, people, unavailable: [], skipped: [], allowTwitch };
     }
   }
-  throw new Error(`Could not find a run with a YouTube or Twitch video after ${tries} tries. This platform may have very few runs.`);
+  throw new Error(`Could not find a run with a ${allowTwitch ? 'YouTube or Twitch' : 'YouTube'} video after ${tries} tries. This platform may have very few runs.`);
 }
 
 /* ---------- formatting ---------- */
@@ -665,7 +672,7 @@ function renderNow(pick) {
   const noVideo = above.filter((r) => !r.video).map((r) => ordinal(r.place));
   const dead = pick.unavailable.map(ordinal), skipped = pick.skipped.map(ordinal);
   const notes = [];
-  if (noVideo.length) notes.push(`${listJoin(noVideo)} place ${noVideo.length > 1 ? 'have' : 'has'} no YouTube or Twitch video.`);
+  if (noVideo.length) notes.push(`${listJoin(noVideo)} place ${noVideo.length > 1 ? 'have' : 'has'} no ${pick.allowTwitch === false ? 'YouTube' : 'YouTube or Twitch'} video.`);
   if (skipped.length) notes.push(`You skipped ${listJoin(skipped)} place.`);
   if (dead.length) notes.push(`${listJoin(dead)} place ${dead.length > 1 ? 'videos' : 'video'} wouldn't play here.`);
   const cover = g.assets?.['cover-large']?.uri || g.assets?.['cover-medium']?.uri;
@@ -764,6 +771,7 @@ $('nextplace').addEventListener('click', () => { if (state.running && state.curr
 $('platform').addEventListener('change', () => { if (state.running) start(); });
 $('misc').addEventListener('change', () => { store.set('sr.misc', $('misc').checked); if (state.running) prefetch(); });
 $('fangames').addEventListener('change', () => { store.set('sr.fangames', $('fangames').checked); if (state.running) prefetch(); });
+$('twitch').addEventListener('change', () => { store.set('sr.twitch', $('twitch').checked); if (state.running) prefetch(); });
 $('showspencer').addEventListener('change', () => { $('spencer').hidden = !$('showspencer').checked; store.set('sr.spencer', $('showspencer').checked); });
 $('romhacks').addEventListener('change', () => { store.set('sr.romhacks', $('romhacks').checked); if (state.running) start(); });
 document.addEventListener('keydown', (e) => {
@@ -776,6 +784,7 @@ document.addEventListener('keydown', (e) => {
   const misc = store.get('sr.misc'); if (misc != null) $('misc').checked = misc;
   $('romhacks').checked = store.get('sr.romhacks') === true;
   $('fangames').checked = store.get('sr.fangames') === true;
+  $('twitch').checked = store.get('sr.twitch') !== false;
   $('showspencer').checked = store.get('sr.spencer') !== false;
   $('spencer').hidden = !$('showspencer').checked;
   try {
