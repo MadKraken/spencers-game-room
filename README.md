@@ -9,6 +9,10 @@ Live site: https://madkraken.github.io/spencers-game-room/
 Run data comes from the [speedrun.com API](https://github.com/speedruncomorg/api). ROM hacks, mods
 and fan games are skipped unless you turn them on in Settings.
 
+Spencer's button sounds (off by default, in Settings) are
+["Gaming Controller Playing Sounds 1"](https://freesound.org/people/Joao_Janz/sounds/477534/) by
+Joao_Janz on Freesound, released under CC0. It's converted to a mono MP3 in `controller.mp3`.
+
 ## Running it locally
 
 ```bash
