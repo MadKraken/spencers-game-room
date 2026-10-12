@@ -188,6 +188,7 @@ kbd { font-family: var(--font-mono); font-size: 11px; border: 1px solid var(--ed
    logo, controls and Now playing card stack in a side panel on the right instead of covering the room.
    Script reads --panel to fit the room into the space left of the panel, and sets --hud-h so the
    card starts below the controls. */
+.panel-toggle { display: none; }   /* only used in the landscape side-panel layout below */
 @media (orientation: landscape) and (max-height: 520px) {
   :root { --panel: min(290px, 38vw); }
   .hud { inset: 0 0 auto auto; width: var(--panel); flex-direction: column; align-items: stretch; gap: 6px; z-index: 11;
@@ -212,6 +213,14 @@ kbd { font-family: var(--font-mono); font-size: 11px; border: 1px solid var(--ed
   .links { gap: 10px; font-size: 11.5px; }
   body::before { inset: -40px 0 -40px -40px; }
   body::after { content: ""; position: fixed; inset: 0 0 0 auto; width: var(--panel); background: rgba(7,6,15,.72); border-left: 1px solid var(--edge); }
+  /* The panel can be collapsed: then only the room shows, full width, with the logo in its top-left
+     corner (over the shelves, clear of the TV) and a button in the top-right to bring the panel back. */
+  .panel-toggle { display: grid; place-items: center; position: fixed; top: 8px; right: calc(var(--panel) + 8px); z-index: 12;
+    width: 30px; height: 30px; padding: 0; font-size: 16px; line-height: 1; }
+  body.collapsed .panel-toggle { right: calc(var(--room-left, 0px) + 8px); }
+  body.collapsed .hud { inset: 0 auto auto var(--room-left, 0px); width: auto; padding: 6px 8px; }
+  body.collapsed .logo { height: 38px; }
+  body.collapsed .controls, body.collapsed .status, body.collapsed .np, body.collapsed::after { display: none; }
 }
 /* The cats sit somewhere on the floor right of Spencer, picked at random on each load (see placeKitties).
    Script sets left (centre), bottom and width; cats further back are drawn smaller. */
@@ -261,7 +270,8 @@ kbd { font-family: var(--font-mono); font-size: 11px; border: 1px solid var(--ed
   </div>
 </div>
 
-<header class="hud">
+<button id="paneltoggle" class="btn panel-toggle" type="button" aria-controls="hud" aria-expanded="true" title="Hide panel">&raquo;</button>
+<header class="hud" id="hud">
   <h1 class="brand"><img class="logo" src="logo.webp" alt="Spencer's Game Room" width="900" height="371"><span id="onair" class="onair" title="On air" aria-hidden="true"></span></h1>
   <div class="controls">
     <select id="platform" disabled aria-label="Platform"><option>Loading platforms…</option></select>
@@ -784,8 +794,9 @@ function layoutRoom() {
   document.documentElement.style.setProperty('--hud-h', hud.offsetHeight + 'px');
   if (sidePanel.matches) {
     // Side-panel layout: fit the room into the space left of the panel; nothing overlaps it.
-    const vw = innerWidth - hud.offsetWidth;
+    const vw = innerWidth - (document.body.classList.contains('collapsed') ? 0 : hud.offsetWidth);
     const h = Math.min(vw / 1.5, vh), w = h * 1.5;
+    document.documentElement.style.setProperty('--room-left', (vw - w) / 2 + 'px');
     Object.assign(tv.style, { width: w + 'px', left: (vw - w) / 2 + 'px', top: (vh - h) / 2 + 'px' });
     tv.style.setProperty('--k', w / 1536);
     return;
@@ -801,6 +812,17 @@ function layoutRoom() {
   Object.assign(tv.style, { width: w + 'px', left: (vw - w) / 2 + 'px', top: top + 'px' });
   tv.style.setProperty('--k', w / 1536);
 }
+function setCollapsed(on) {
+  document.body.classList.toggle('collapsed', on);
+  const t = $('paneltoggle');
+  t.innerHTML = on ? '&laquo;' : '&raquo;';
+  t.title = on ? 'Show panel' : 'Hide panel';
+  t.setAttribute('aria-expanded', String(!on));
+  store.set('sr.collapsed', on);
+  layoutRoom();
+}
+$('paneltoggle').addEventListener('click', () => setCollapsed(!document.body.classList.contains('collapsed')));
+setCollapsed(store.get('sr.collapsed') === true);
 addEventListener('resize', layoutRoom);
 new ResizeObserver(layoutRoom).observe(document.querySelector('.hud'));
 layoutRoom();
