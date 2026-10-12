@@ -49,9 +49,11 @@ button, input, select { font: inherit; color: inherit; }
   transform: scale(var(--k, .5)) matrix3d(0.838887657, -0.0591475361, 0, -0.000120143433, 0, 0.908450704, 0, 0, 0, 0, 1, 0, 579, 145, 0, 1); }
 /* Twitch's player refuses to play when it is scaled down, warped, or has anything drawn over it
    (even a transparent box, like the empty corner of Spencer's image). So Twitch videos use a flat
-   screen sized by layout, not transforms: the largest rectangle inside the angled display
-   (x 579-1341, y 145-532), raised above everything else in the room. YouTube keeps the warp. */
-.screen.flat { transform: none; left: 37.695%; top: 14.160%; width: 49.609%; height: 37.793%; z-index: 5; }
+   screen sized by layout, not transforms: the display's bounding box (x 579-1341, y 110-536), with the
+   corner that pokes past the angled bezel clipped off, raised above everything else in the room.
+   YouTube keeps the warp. */
+.screen.flat { transform: none; left: 37.695%; top: 10.742%; width: 49.609%; height: 41.602%; z-index: 5;
+  clip-path: polygon(0 8.216%, 100% 0, 100% 100%, 0 99.061%); }
 #stage, #stage > * , #stage iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
 .slate { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 2cqh; padding: 6cqw; color: var(--muted); font-size: 3cqw; line-height: 1.4;
   background: repeating-linear-gradient(0deg, transparent 0 3px, rgba(255,255,255,.018) 3px 4px); }
