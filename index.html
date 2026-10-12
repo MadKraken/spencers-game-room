@@ -123,7 +123,22 @@ button, input, select { font: inherit; color: inherit; }
 .onair.on { background: var(--live); box-shadow: 0 0 10px var(--live); animation: pulse 2s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .45; } }
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
-#platform { width: min(260px, 60vw); background: var(--glass-hi); border: 1px solid var(--edge); border-radius: 6px; padding: 7px 10px; cursor: pointer; }
+/* Platform picker: a dropdown of checkboxes with a filter box and check all / none. */
+.platforms { position: relative; }
+.platforms summary { list-style: none; width: min(260px, 60vw); display: flex; align-items: center; gap: 8px; background: var(--glass-hi); font-weight: 500; }
+.platforms summary::-webkit-details-marker { display: none; }
+.platforms summary span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+.platforms summary::after { content: "\25BE"; color: var(--muted); }
+.plat-menu { position: absolute; left: 0; top: calc(100% + 6px); z-index: 1; width: min(320px, calc(100vw - 32px)); max-height: min(70vh, 520px);
+  display: flex; flex-direction: column; gap: 8px; padding: 10px;
+  background: #1a1533; border: 1px solid var(--edge); border-radius: 8px; box-shadow: 0 12px 30px rgba(0,0,0,.5); }
+#platfilter { width: 100%; background: rgba(0,0,0,.3); border: 1px solid var(--edge); border-radius: 6px; padding: 6px 9px; }
+.plat-actions { display: flex; gap: 6px; align-items: center; }
+.plat-actions .btn { padding: 4px 10px; font-size: 12.5px; }
+.plat-count { margin-left: auto; font-size: 12px; color: var(--muted); }
+.plat-list { overflow: auto; display: flex; flex-direction: column; gap: 1px; padding-right: 4px; }
+.plat-list .check { padding: 3px 4px; border-radius: 4px; }
+.plat-list .check:hover { background: rgba(148,128,255,.12); }
 .btn { border: 1px solid var(--edge); background: var(--glass); border-radius: 6px; padding: 7px 14px; cursor: pointer; font-weight: 600; white-space: nowrap; }
 .btn:hover:not(:disabled) { background: var(--glass-hi); border-color: rgba(170,150,255,.7); }
 .btn.primary { background: var(--gold); border-color: var(--gold); color: #1d1404; }
@@ -196,7 +211,9 @@ kbd { font-family: var(--font-mono); font-size: 11px; border: 1px solid var(--ed
   .brand { justify-content: center; }
   .logo { height: 46px; }
   .controls { margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
-  #platform { grid-column: 1 / -1; width: 100%; padding: 5px 8px; font-size: 13px; }
+  .platforms { grid-column: 1 / -1; }
+  .platforms summary { width: 100%; padding: 5px 8px; font-size: 13px; }
+  .plat-menu { width: 100%; max-height: calc(100vh - 110px); }
   .btn { padding: 5px 8px; font-size: 12.5px; }
   .settings { grid-column: 1 / -1; }
   .settings summary { text-align: center; }
@@ -278,7 +295,18 @@ kbd { font-family: var(--font-mono); font-size: 11px; border: 1px solid var(--ed
 <header class="hud" id="hud">
   <h1 class="brand"><img class="logo" src="logo.webp" alt="Spencer's Game Room" width="900" height="371"><span id="onair" class="onair" title="On air" aria-hidden="true"></span></h1>
   <div class="controls">
-    <select id="platform" disabled aria-label="Platform"><option>Loading platforms…</option></select>
+    <details class="platforms" id="platpick">
+      <summary class="btn" id="platsummary" aria-label="Platforms"><span>Loading platforms…</span></summary>
+      <div class="plat-menu">
+        <input id="platfilter" type="search" placeholder="Filter platforms" aria-label="Filter platforms" autocomplete="off">
+        <div class="plat-actions">
+          <button id="platall" class="btn" type="button">Check all</button>
+          <button id="platnone" class="btn" type="button">Check none</button>
+          <span id="platcount" class="plat-count"></span>
+        </div>
+        <div id="platlist" class="plat-list" role="group" aria-label="Platforms"></div>
+      </div>
+    </details>
     <button id="randplat" class="btn" disabled title="Pick a random platform and start watching">Random platform</button>
     <button id="start" class="btn primary" disabled>Start watching</button>
     <button id="nextplace" class="btn" disabled title="Play the next-placed run on this leaderboard. Shortcut: P">Next place</button>
@@ -445,10 +473,10 @@ async function loadBlockedSeries() {
 let blockedSeries = null;
 const getBlockedSeries = () => (blockedSeries ||= loadBlockedSeries().catch(() => { blockedSeries = null; return { hack: new Set(), fan: new Set() }; }));
 const gameSeries = (g) => (g.links || []).filter((l) => l.rel === 'series').map((l) => l.uri.split('/').pop());
-async function pickRun(pid, filter, count, includeMisc, onProgress) {
+async function pickRun(pid, filter, count, includeMisc, onProgress, maxTries = 30) {
   let boards = 0;
   const allowTwitch = $('twitch').checked;
-  const tries = Math.min(30, Math.max(6, count * 2));
+  const tries = Math.min(maxTries, Math.max(6, count * 2));
   for (let attempt = 0; attempt < tries; attempt++) {
     const g = (await api(`/games?platform=${pid}${filter}&max=1&offset=${randInt(count)}&embed=categories.variables`)).data[0];
     if (!g) continue;
@@ -617,14 +645,47 @@ function videoUnavailable(pick, manual = false) {
 }
 
 /* ---------- the channel ---------- */
-const state = { platforms: [], pid: null, filter: '', count: 0, current: null, upcoming: null, token: 0, running: false, rolled: false, rerolls: 0 };
+const state = { platforms: [], pids: [], filter: '', counts: new Map(), current: null, upcoming: null, token: 0, running: false, rolled: false, rerolls: 0 };
+
+/* ---------- platform picker ---------- */
+const platBoxes = () => [...$('platlist').querySelectorAll('input[type=checkbox]')];
+const selectedPlatforms = () => platBoxes().filter((b) => b.checked).map((b) => state.platforms.find((p) => p.id === b.value));
+const platName = (id) => state.platforms.find((p) => p.id === id)?.name || 'That platform';
+function platformLabel(sel) {
+  if (!sel.length) return 'No platforms';
+  if (sel.length === state.platforms.length) return 'All platforms';
+  return sel.length === 1 ? sel[0].name : `${sel.length} platforms`;
+}
+function updatePlatSummary() {
+  const sel = selectedPlatforms();
+  $('platsummary').querySelector('span').textContent = platformLabel(sel);
+  $('platsummary').title = sel.map((p) => p.name).join(', ');
+  $('platcount').textContent = `${sel.length} of ${state.platforms.length}`;
+  store.set('sr.selected', sel.map((p) => p.id));
+}
+function setPlatforms(ids) {
+  const want = new Set(ids);
+  for (const b of platBoxes()) b.checked = want.has(b.value);
+  updatePlatSummary();
+}
+// "Check all" / "Check none" act on the platforms the filter is showing (all of them when it's empty).
+function checkShown(on) {
+  for (const b of platBoxes()) if (!b.closest('label').hidden) b.checked = on;
+  updatePlatSummary();
+}
+function filterPlatforms() {
+  const q = $('platfilter').value.trim().toLowerCase();
+  for (const b of platBoxes()) b.closest('label').hidden = q && !b.closest('label').textContent.toLowerCase().includes(q);
+  $('platall').textContent = q ? 'Check shown' : 'Check all';
+  $('platnone').textContent = q ? 'Uncheck shown' : 'Check none';
+}
 
 // Some platforms have almost no runs with video. When the platform was rolled at random,
 // quietly roll another one instead of stopping on an error.
 function randomPlatform(fresh = true) {
   if (fresh) state.rerolls = 0;
-  const opts = state.platforms.filter((p) => p.id !== state.pid);
-  $('platform').value = opts[randInt(opts.length)].id;
+  const opts = state.platforms.filter((p) => !(state.pids.length === 1 && p.id === state.pids[0]));
+  setPlatforms([opts[randInt(opts.length)].id]);
   start(true);
 }
 function rerollAfterFailure(name) {
@@ -641,10 +702,33 @@ function setStatus(msg, err = false, busy = false) {
   el.innerHTML = (busy ? '<span class="spin" aria-hidden="true"></span>' : '') + esc(msg);
 }
 
+// Pick a run from the checked platforms: roll one of them (each platform equally likely, so small
+// consoles get as many turns as PC), then a random game on it. A platform that turns up nothing is
+// dropped for the rest of this pick and another one is rolled.
+async function pickAcross(onProgress) {
+  const { filter } = state, misc = $('misc').checked, pool = [...state.pids];
+  let lastErr = null;
+  while (pool.length) {
+    const pid = pool[randInt(pool.length)];
+    try {
+      let count = state.counts.get(pid);
+      if (count == null) { count = await countGames(pid, filter); state.counts.set(pid, count); }
+      if (!count) throw new Error(`speedrun.com has no ${filter ? 'non-ROM-hack ' : ''}games listed for ${platName(pid)}.`);
+      const pick = await pickRun(pid, filter, count, misc, onProgress, pool.length > 1 ? 8 : 30);
+      pick.pid = pid;
+      return pick;
+    } catch (e) {
+      if (!e.status && !/no .*games listed|Could not find a run/.test(e.message)) throw e;
+      lastErr = e;
+      pool.splice(pool.indexOf(pid), 1);
+    }
+  }
+  throw state.pids.length > 1 ? new Error('None of the checked platforms turned up a run with a video. Try checking more platforms.') : lastErr;
+}
+
 function prefetch() {
-  const t = state.token, { pid, filter, count } = state;
-  const misc = $('misc').checked;
-  state.upcoming = pickRun(pid, filter, count, misc).then((p) => (t === state.token ? p : null));
+  const t = state.token;
+  state.upcoming = pickAcross().then((p) => (t === state.token ? p : null));
   state.upcoming.catch(() => {});
 }
 
@@ -660,7 +744,7 @@ async function advance(reason) {
     let pick = state.upcoming ? await state.upcoming : null;
     if (t !== state.token) return;
     if (!pick) {
-      pick = await pickRun(state.pid, state.filter, state.count, $('misc').checked, (n, name) => {
+      pick = await pickAcross((n, name) => {
         if (t === state.token) setStatus(`Checking ${name} (leaderboard ${n})…`, false, true);
       });
     }
@@ -672,45 +756,29 @@ async function advance(reason) {
   } catch (e) {
     if (t !== state.token) return;
     state.upcoming = null;
-    if (rerollAfterFailure(state.platforms.find((x) => x.id === state.pid)?.name || 'That platform')) return;
+    if (rerollAfterFailure(platName(state.pids[0]))) return;
     setStatus(e.message, true);
     $('slate').innerHTML = `<strong>Couldn't find a run</strong><span>${esc(e.message)}</span>`;
   }
 }
 
-async function start(rolled = false) {
-  const p = state.platforms.find((x) => x.id === $('platform').value);
-  if (!p) { setStatus('Choose a platform from the list.', true); return; }
-  store.set('sr.lastPlatform', p.name);
-  state.token++; state.running = false; state.current = null; state.upcoming = null; state.rolled = rolled;
+function start(rolled = false) {
+  const sel = selectedPlatforms();
+  if (!sel.length) { setStatus('Check at least one platform.', true); return; }
+  state.token++; state.current = null; state.upcoming = null; state.rolled = rolled;
   ++session; clearPlayer();
+  Object.assign(state, { pids: sel.map((p) => p.id), filter: $('romhacks').checked ? '' : '&romhack=false', counts: new Map(), running: true });
   $('slate').hidden = false;
-  $('slate').innerHTML = `<strong>Tuning in to ${esc(p.name)}</strong><span>Counting games on this platform…</span>`;
-  $('skip').disabled = true; $('nextplace').disabled = true;
-  const t = state.token;
-  setStatus(`Counting ${p.name} games…`, false, true);
-  try {
-    const filter = $('romhacks').checked ? '' : '&romhack=false';
-    const count = await countGames(p.id, filter);
-    if (t !== state.token) return;
-    if (!count) throw new Error(`speedrun.com has no ${filter ? 'non-ROM-hack ' : ''}games listed for ${p.name}.`);
-    Object.assign(state, { pid: p.id, filter, count, running: true });
-    $('onair').classList.add('on'); $('wallsign').classList.add('on');
-    $('skip').disabled = false; $('nextplace').disabled = false;
-    $('start').textContent = 'Restart';
-    $('platform').title = `${count.toLocaleString()} games`;
-    advance('start');
-  } catch (e) {
-    if (t !== state.token) return;
-    if (rerollAfterFailure(p.name)) return;
-    setStatus(e.message, true);
-    $('slate').innerHTML = `<strong>Couldn't start</strong><span>${esc(e.message)}</span>`;
-  }
+  $('slate').innerHTML = `<strong>Tuning in to ${esc(platformLabel(sel))}</strong><span>Rolling a random game and category.</span>`;
+  $('onair').classList.add('on'); $('wallsign').classList.add('on');
+  $('skip').disabled = false; $('nextplace').disabled = false;
+  $('start').textContent = 'Restart';
+  advance('start');
 }
 
 function renderNow(pick) {
   const c = pick.cands[pick.idx], g = pick.game, run = c.run;
-  const pname = state.platforms.find((p) => p.id === state.pid)?.name || '';
+  const pname = platName(pick.pid);
   const above = pick.runs.filter((r) => r.place < c.place);
   const noVideo = above.filter((r) => !r.video).map((r) => ordinal(r.place));
   const dead = pick.unavailable.map(ordinal), skipped = pick.skipped.map(ordinal);
@@ -836,7 +904,21 @@ $('start').addEventListener('click', () => start());
 $('randplat').addEventListener('click', () => randomPlatform());
 $('skip').addEventListener('click', () => advance('skipped'));
 $('nextplace').addEventListener('click', () => { if (state.running && state.current) videoUnavailable(state.current, true); });
-$('platform').addEventListener('change', () => { if (state.running) start(); });
+// Changes to the platform checkboxes take effect when the dropdown closes, so checking several
+// doesn't restart the channel after each one.
+let platOpenedWith = '';
+$('platpick').addEventListener('toggle', () => {
+  if ($('platpick').open) { platOpenedWith = selectedPlatforms().map((p) => p.id).join(); $('platfilter').focus(); return; }
+  if (state.running && selectedPlatforms().map((p) => p.id).join() !== platOpenedWith && selectedPlatforms().length) start();
+});
+$('platlist').addEventListener('change', updatePlatSummary);
+$('platfilter').addEventListener('input', filterPlatforms);
+$('platall').addEventListener('click', () => checkShown(true));
+$('platnone').addEventListener('click', () => checkShown(false));
+// Clicking anywhere else closes an open dropdown.
+document.addEventListener('click', (e) => {
+  for (const d of document.querySelectorAll('details.platforms[open], details.settings[open]')) if (!d.contains(e.target)) d.open = false;
+});
 $('misc').addEventListener('change', () => { store.set('sr.misc', $('misc').checked); if (state.running) prefetch(); });
 $('fangames').addEventListener('change', () => { store.set('sr.fangames', $('fangames').checked); if (state.running) prefetch(); });
 $('twitch').addEventListener('change', () => { store.set('sr.twitch', $('twitch').checked); if (state.running) prefetch(); });
@@ -857,11 +939,16 @@ document.addEventListener('keydown', (e) => {
   $('spencer').hidden = !$('showspencer').checked;
   try {
     state.platforms = await loadPlatforms();
-    $('platform').innerHTML = state.platforms.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
-    const last = store.get('sr.lastPlatform') || 'Nintendo Entertainment System';
-    const sel = state.platforms.find((p) => p.name === last) || state.platforms.find((p) => p.name === 'Nintendo Entertainment System');
-    if (sel) $('platform').value = sel.id;
-    $('platform').disabled = false; $('start').disabled = false; $('randplat').disabled = false;
+    $('platlist').innerHTML = state.platforms.map((p) =>
+      `<label class="check"><input type="checkbox" value="${esc(p.id)}"> ${esc(p.name)}</label>`).join('');
+    // Restore the last selection; earlier versions saved a single platform by name. Default: NES.
+    let ids = store.get('sr.selected');
+    if (!Array.isArray(ids) || !ids.length) {
+      const last = store.get('sr.lastPlatform') || 'Nintendo Entertainment System';
+      ids = [(state.platforms.find((p) => p.name === last) || state.platforms.find((p) => p.name === 'Nintendo Entertainment System'))?.id];
+    }
+    setPlatforms(ids);
+    $('start').disabled = false; $('randplat').disabled = false;
   } catch (e) { setStatus(e.message, true); }
 })();
 </script>
