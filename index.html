@@ -214,10 +214,14 @@ kbd { font-family: var(--font-mono); font-size: 11px; border: 1px solid var(--ed
   body::before { inset: -40px 0 -40px -40px; }
   body::after { content: ""; position: fixed; inset: 0 0 0 auto; width: var(--panel); background: rgba(7,6,15,.72); border-left: 1px solid var(--edge); }
   /* The panel can be collapsed: then only the room shows, full width, with the logo in its top-left
-     corner (over the shelves, clear of the TV) and a button in the top-right to bring the panel back. */
-  .panel-toggle { display: grid; place-items: center; position: fixed; top: 8px; right: calc(var(--panel) + 8px); z-index: 12;
+     corner (over the shelves, clear of the TV). The arrow button never sits on the room: it's in the
+     panel's corner while open, and in the blurred band beside the room while collapsed, when the
+     screen leaves one wide enough (script sets .no-band otherwise). Tapping the logo also toggles. */
+  .panel-toggle { display: grid; place-items: center; position: fixed; top: 8px; right: calc(var(--panel) - 38px); z-index: 12;
     width: 30px; height: 30px; padding: 0; font-size: 16px; line-height: 1; }
-  body.collapsed .panel-toggle { right: calc(var(--room-left, 0px) + 8px); }
+  body.collapsed .panel-toggle { right: calc((var(--room-left, 0px) - 30px) / 2); }
+  body.collapsed.no-band .panel-toggle { display: none; }
+  .logo { cursor: pointer; }
   body.collapsed .hud { inset: 0 auto auto var(--room-left, 0px); width: auto; padding: 6px 8px; }
   body.collapsed .logo { height: 38px; }
   body.collapsed .controls, body.collapsed .status, body.collapsed .np, body.collapsed::after { display: none; }
@@ -797,6 +801,7 @@ function layoutRoom() {
     const vw = innerWidth - (document.body.classList.contains('collapsed') ? 0 : hud.offsetWidth);
     const h = Math.min(vw / 1.5, vh), w = h * 1.5;
     document.documentElement.style.setProperty('--room-left', (vw - w) / 2 + 'px');
+    document.body.classList.toggle('no-band', (vw - w) / 2 < 40);
     Object.assign(tv.style, { width: w + 'px', left: (vw - w) / 2 + 'px', top: (vh - h) / 2 + 'px' });
     tv.style.setProperty('--k', w / 1536);
     return;
@@ -822,6 +827,7 @@ function setCollapsed(on) {
   layoutRoom();
 }
 $('paneltoggle').addEventListener('click', () => setCollapsed(!document.body.classList.contains('collapsed')));
+document.querySelector('.logo').addEventListener('click', () => { if (sidePanel.matches) setCollapsed(!document.body.classList.contains('collapsed')); });
 setCollapsed(store.get('sr.collapsed') === true);
 addEventListener('resize', layoutRoom);
 new ResizeObserver(layoutRoom).observe(document.querySelector('.hud'));
