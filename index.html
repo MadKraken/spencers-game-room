@@ -184,6 +184,35 @@ kbd { font-family: var(--font-mono); font-size: 11px; border: 1px solid var(--ed
   .case { width: 72px; }
   .np-info h2 { font-size: 18px; }
 }
+/* Short landscape screens (phones on their side): the room takes the full height on the left, and the
+   logo, controls and Now playing card stack in a side panel on the right instead of covering the room.
+   Script reads --panel to fit the room into the space left of the panel, and sets --hud-h so the
+   card starts below the controls. */
+@media (orientation: landscape) and (max-height: 520px) {
+  :root { --panel: min(290px, 38vw); }
+  .hud { inset: 0 0 auto auto; width: var(--panel); flex-direction: column; align-items: stretch; gap: 6px; z-index: 11;
+    padding: 8px 10px; background: none; }
+  .brand { justify-content: center; }
+  .logo { height: 46px; }
+  .controls { margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+  #platform { grid-column: 1 / -1; width: 100%; padding: 5px 8px; font-size: 13px; }
+  .btn { padding: 5px 8px; font-size: 12.5px; }
+  .settings { grid-column: 1 / -1; }
+  .settings summary { text-align: center; }
+  .settings .menu { left: 0; right: 0; min-width: 0; }
+  .status { font-size: 12px; min-height: 0; }
+  .status:empty { display: none; }
+  .np { top: calc(var(--hud-h, 200px) + 4px); bottom: 8px; right: 8px; left: auto; width: calc(var(--panel) - 16px); max-height: none;
+    padding: 10px; gap: 8px; }
+  .np-label { font-size: 11px; }
+  .np-main { gap: 10px; }
+  .case { width: 58px; }
+  .np-info h2 { font-size: 15px; }
+  .cat, .stats { font-size: 12px; }
+  .links { gap: 10px; font-size: 11.5px; }
+  body::before { inset: -40px 0 -40px -40px; }
+  body::after { content: ""; position: fixed; inset: 0 0 0 auto; width: var(--panel); background: rgba(7,6,15,.72); border-left: 1px solid var(--edge); }
+}
 /* The cats sit somewhere on the floor right of Spencer, picked at random on each load (see placeKitties).
    Script sets left (centre), bottom and width; cats further back are drawn smaller. */
 .kitty { position: absolute; z-index: 2; pointer-events: none; translate: -50% 0; }
@@ -749,9 +778,20 @@ function pushHistory(pick) {
 // Fit the room to the window, centred. The top bar may overlap the posters above the TV but never the
 // TV itself (Twitch won't play with anything over it), so push the room down, and shrink it if needed.
 const TV_TOP = 0.10;   // top of the TV's bezel glow, as a fraction of the room's height
+const sidePanel = matchMedia('(orientation: landscape) and (max-height: 520px)');
 function layoutRoom() {
-  const tv = document.querySelector('.tv'), vw = innerWidth, vh = innerHeight;
-  const hudBottom = document.querySelector('.hud').getBoundingClientRect().bottom;
+  const tv = document.querySelector('.tv'), vh = innerHeight, hud = document.querySelector('.hud');
+  document.documentElement.style.setProperty('--hud-h', hud.offsetHeight + 'px');
+  if (sidePanel.matches) {
+    // Side-panel layout: fit the room into the space left of the panel; nothing overlaps it.
+    const vw = innerWidth - hud.offsetWidth;
+    const h = Math.min(vw / 1.5, vh), w = h * 1.5;
+    Object.assign(tv.style, { width: w + 'px', left: (vw - w) / 2 + 'px', top: (vh - h) / 2 + 'px' });
+    tv.style.setProperty('--k', w / 1536);
+    return;
+  }
+  const vw = innerWidth;
+  const hudBottom = hud.getBoundingClientRect().bottom;
   let h = Math.min(vw / 1.5, vh), top = (vh - h) / 2;
   if (top + TV_TOP * h < hudBottom) {
     h = Math.min(h, (vh - hudBottom) / (1 - TV_TOP));
