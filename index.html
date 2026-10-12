@@ -1,0 +1,790 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spencer's Game Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@500;600;700&family=Chakra+Petch:wght@600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: Spencer's gaming room fills the window (letterboxed by a blurred copy of itself).
+   The HUD floats across the top, and a "Now playing" card sits on the right like a game case on display. */
+:root {
+  color-scheme: dark;
+  --night: #07060f;                     /* behind everything */
+  --glass: rgba(16, 12, 34, .80);       /* overlay panels */
+  --glass-hi: rgba(28, 22, 58, .92);
+  --edge: rgba(148, 128, 255, .32);     /* neon-purple panel edge, from the room's LED strip */
+  --text: #ece8ff;
+  --muted: #a39dc4;
+  --gold: #f4b740;                      /* 1st-place trophy, lamp glow */
+  --silver: #c8cee0;
+  --bronze: #d58a52;
+  --live: #ff5a4e;                      /* on-air light */
+  --font-pixel: "Pixelify Sans", "Chakra Petch", "Segoe UI", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body { margin: 0; overflow: hidden; background: var(--night); color: var(--text); font: 14px/1.45 var(--font-body); }
+/* Letterbox fill: the room again, blurred and dimmed, so the edges never show flat black. */
+body::before { content: ""; position: fixed; inset: -40px; background: url(room.webp) center / cover no-repeat;
+  filter: blur(28px) brightness(.4) saturate(1.2); }
+a { color: inherit; text-decoration-color: color-mix(in srgb, var(--gold) 60%, transparent); text-underline-offset: 3px; }
+a:hover { color: var(--gold); }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+/* ---- The room ---- */
+/* The video plays on the TV. The TV is slightly angled, so its display is a trapezoid in room.webp
+   (1536x1024): corners TL 579,145  TR 1341,110  BR 1341,536  BL 579,532. .screen is laid out at
+   762x426 in image pixels, warped onto those corners with a perspective matrix, then scaled with the
+   room (--k = room width / 1536, set from script). */
+.tv { position: fixed; left: 0; top: 0; width: min(100vw, 150vh); aspect-ratio: 1536 / 1024; container-type: inline-size; overflow: hidden;
+  background: url(room.webp) 0 0 / 100% 100% no-repeat; box-shadow: 0 0 80px rgba(0,0,0,.6); }
+.screen { position: absolute; left: 0; top: 0; width: 762px; height: 426px; background: #05060a; overflow: hidden; container-type: size;
+  transform-origin: 0 0;
+  transform: scale(var(--k, .5)) matrix3d(0.838887657, -0.0591475361, 0, -0.000120143433, 0, 0.908450704, 0, 0, 0, 0, 1, 0, 579, 145, 0, 1); }
+/* Twitch's player refuses to play when it is scaled down, warped, or has anything drawn over it
+   (even a transparent box, like the empty corner of Spencer's image). So Twitch videos use a flat
+   screen sized by layout, not transforms: the largest rectangle inside the angled display
+   (x 579-1341, y 145-532), raised above everything else in the room. YouTube keeps the warp. */
+.screen.flat { transform: none; left: 37.695%; top: 14.160%; width: 49.609%; height: 37.793%; z-index: 5; }
+#stage, #stage > * , #stage iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.slate { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 2cqh; padding: 6cqw; color: var(--muted); font-size: 3cqw; line-height: 1.4;
+  background: repeating-linear-gradient(0deg, transparent 0 3px, rgba(255,255,255,.018) 3px 4px); }
+.slate strong { font-family: var(--font-pixel); font-size: 6.5cqw; line-height: 1.1; color: var(--text); font-weight: 600; }
+/* Light sources in room.webp get a soft glow that breathes or flickers. Each glow is centred on its
+   lamp (image coords: floor lantern 56,576; shelf lantern 206,377; "?" block 118,205; Triforce lamp
+   1414,580) and blended with "screen" so it only ever brightens the room. The TV's LED backlight and
+   the strip under the TV stand get a slow pulse. Glows sit under the TV picture, wall pieces and Spencer. */
+.lights { position: absolute; inset: 0; pointer-events: none; }
+.glow { position: absolute; translate: -50% -50%; aspect-ratio: 1; border-radius: 50%; mix-blend-mode: screen; }
+.glow.lantern { background: radial-gradient(closest-side, rgba(255,190,90,.42), rgba(255,140,40,.16) 55%, transparent); animation: flicker 3.3s linear infinite; }
+.glow.lantern.floor { left: 3.65%; top: 56.25%; width: 11cqw; }
+.glow.lantern.shelf { left: 13.41%; top: 36.82%; width: 9cqw; animation-duration: 4.1s; animation-delay: -1.7s; }
+.glow.qblock-light { left: 7.68%; top: 20.02%; width: 10cqw; background: radial-gradient(closest-side, rgba(255,170,60,.34), transparent); animation: glow-breathe 5.2s ease-in-out infinite; }
+.glow.triforce { left: 92.06%; top: 56.64%; width: 12cqw; background: radial-gradient(closest-side, rgba(255,200,90,.4), rgba(255,150,40,.14) 55%, transparent); animation: glow-breathe 6.4s ease-in-out infinite -2s; }
+.backlight { position: absolute; left: 36.46%; top: 8.98%; width: 52.21%; height: 45.31%; mix-blend-mode: screen;
+  box-shadow: 0 0 4cqw 1.2cqw rgba(80,90,255,.38); animation: glow-breathe 8s ease-in-out infinite; }
+.floorstrip { position: absolute; left: 53.7%; top: 78.1%; width: 72%; height: 10%; translate: -50% -50%; mix-blend-mode: screen;
+  background: radial-gradient(closest-side, rgba(90,90,255,.32), transparent); animation: glow-breathe 8s ease-in-out infinite -4s; }
+@keyframes flicker {
+  0% { opacity: .78; } 6% { opacity: .62; } 11% { opacity: .86; } 19% { opacity: .7; } 31% { opacity: .92; }
+  38% { opacity: .66; } 52% { opacity: .82; } 64% { opacity: .72; } 77% { opacity: .9; } 88% { opacity: .68; } 100% { opacity: .78; }
+}
+@keyframes glow-breathe { 0%, 100% { opacity: .45; } 50% { opacity: .9; } }
+/* Wall left of the TV. The poster shows the current game's whole cover, letterboxed on black when its
+   shape doesn't match the frame. The poster
+   is seen at the same slight angle as the TV: corners TL 395,315  TR 506,310.5  BR 506,444  BL 395,444 in
+   room.webp, so .wall-cover is laid out at 111x134 image pixels and warped onto them like .screen. The plaque under it
+   (x 404-508, y 460-507) becomes a "Now playing" sign that lights up while a run is on. */
+.wall-cover { position: absolute; left: 0; top: 0; width: 111px; height: 134px; z-index: 1;
+  background: #000; border: 3px solid #0b0816; box-shadow: 4px 5px 8px rgba(0,0,0,.55);
+  transform-origin: 0 0;
+  transform: scale(var(--k, .5)) matrix3d(0.846340723, -0.134831461, 0, -0.000303674461, 0, 0.962686567, 0, 0, 0, 0, 1, 0, 395, 315, 0, 1); }
+.wall-cover img { display: block; width: 100%; height: 100%; object-fit: contain; filter: brightness(.82); }
+.wall-cover::after { content: ""; position: absolute; inset: 0; box-shadow: inset 0 0 14px rgba(0,0,0,.55); }
+.wall-sign { position: absolute; left: 26.302%; top: 44.922%; width: 6.771%; height: 4.590%; z-index: 1;
+  display: grid; place-content: center; text-align: center; border-radius: .25cqw;
+  background: #120c22; border: .18cqw solid #2a2145; box-shadow: .2cqw .25cqw .45cqw rgba(0,0,0,.55);
+  font-family: var(--font-pixel); font-weight: 700; font-size: 1.12cqw; line-height: 1; letter-spacing: .06em; color: #4a3f2a; }
+.wall-sign span { display: block; }
+.wall-sign.on { color: #ffd77a; text-shadow: 0 0 .25cqw #f4b740, 0 0 .7cqw #f08a1c; animation: neon 7s steps(1, end) infinite; }
+@keyframes neon { 0%, 91%, 94%, 100% { opacity: 1; } 92%, 95% { opacity: .55; } }
+/* Spencer sits on the rug in front of the TV stand, in his recliner, facing the screen. He's close to
+   the viewer, so the bottom of the recliner runs off the edge of the room. */
+.spencer { position: absolute; left: 7%; bottom: -1%; width: 40%; max-width: 100%; z-index: 2; pointer-events: none; }
+/* Contact shadow under the recliner so it sits on the floor instead of floating. */
+.spencer::before { content: ""; position: absolute; left: 6%; right: 8%; bottom: -2%; height: 14%;
+  background: radial-gradient(closest-side, rgba(0,0,0,.6), transparent); }
+/* The rig moves as one piece: a slow breath, plus a small rock back in the recliner every so often. */
+.spencer .rig { position: relative; transform-origin: 40% 97%; animation: breathe 3.6s ease-in-out infinite, rock 11s ease-in-out infinite; }
+.spencer img { display: block; width: 100%; height: auto; }
+@keyframes breathe { 0%, 100% { scale: 1 1; } 50% { scale: 1.004 1.01; } }
+@keyframes rock {
+  0%, 62%, 100% { rotate: 0deg; }
+  68%, 80% { rotate: 1deg; }
+  84% { rotate: .6deg; }
+  88% { rotate: 1.2deg; }
+}
+
+/* ---- HUD across the top ---- */
+.hud { position: fixed; inset: 0 0 auto 0; z-index: 10; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px;
+  padding: 12px 16px 14px; background: linear-gradient(to bottom, rgba(7,6,15,.88) 0%, rgba(7,6,15,.55) 75%, transparent); }
+.brand { display: flex; align-items: center; gap: 10px; margin: 0; font-family: var(--font-pixel); font-weight: 600; font-size: 22px; letter-spacing: .02em;
+  text-shadow: 0 0 12px rgba(148,128,255,.55); }
+.logo { display: block; height: 114px; width: auto; filter: drop-shadow(0 4px 10px rgba(0,0,0,.6)); }
+.onair { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+.onair.on { background: var(--live); box-shadow: 0 0 10px var(--live); animation: pulse 2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .45; } }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
+#platform { width: min(260px, 60vw); background: var(--glass-hi); border: 1px solid var(--edge); border-radius: 6px; padding: 7px 10px; cursor: pointer; }
+.btn { border: 1px solid var(--edge); background: var(--glass); border-radius: 6px; padding: 7px 14px; cursor: pointer; font-weight: 600; white-space: nowrap; }
+.btn:hover:not(:disabled) { background: var(--glass-hi); border-color: rgba(170,150,255,.7); }
+.btn.primary { background: var(--gold); border-color: var(--gold); color: #1d1404; }
+.btn.primary:hover:not(:disabled) { background: var(--gold); filter: brightness(1.08); }
+.btn:disabled { opacity: .45; cursor: default; }
+.settings { position: relative; }
+.settings summary { list-style: none; }
+.settings summary::-webkit-details-marker { display: none; }
+.settings .menu { position: absolute; right: 0; top: calc(100% + 6px); display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; min-width: 210px;
+  background: var(--glass-hi); border: 1px solid var(--edge); border-radius: 8px; box-shadow: 0 12px 30px rgba(0,0,0,.5); }
+.check { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 13px; cursor: pointer; }
+.status { flex-basis: 100%; min-height: 1.4em; font-size: 13px; color: var(--muted); display: flex; gap: 8px; align-items: center; text-shadow: 0 1px 2px #000; }
+.status.err { color: #ff8f86; }
+.spin { width: 12px; height: 12px; border: 2px solid rgba(255,255,255,.2); border-top-color: var(--gold); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---- Now playing card ---- */
+.np { position: fixed; right: 16px; bottom: 16px; z-index: 10; width: min(380px, calc(100vw - 32px)); max-height: calc(100vh - 110px); overflow: auto;
+  display: flex; flex-direction: column; gap: 12px; padding: 14px;
+  background: var(--glass); border: 1px solid var(--edge); border-radius: 10px; backdrop-filter: blur(10px);
+  box-shadow: 0 0 0 1px rgba(0,0,0,.4), 0 18px 40px rgba(0,0,0,.55), 0 0 24px rgba(110,90,255,.18); }
+.np-label { display: flex; align-items: center; gap: 8px; margin: 0; font-family: var(--font-pixel); font-size: 13px; letter-spacing: .14em; text-transform: uppercase; color: var(--gold); }
+.np-main { display: flex; gap: 14px; align-items: flex-start; }
+/* The cover is shown like a game case: a slim spine highlight on the left and a drop shadow. */
+.case { position: relative; flex: none; width: 96px; border-radius: 3px; overflow: hidden; background: #1b1633;
+  box-shadow: 0 8px 18px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.08); }
+.case img { display: block; width: 100%; height: auto; }
+.case::after { content: ""; position: absolute; inset: 0 auto 0 0; width: 6px; background: linear-gradient(to right, rgba(255,255,255,.22), transparent); }
+/* Empty state: a "?" block standing in for the cover. */
+.qblock { display: grid; place-items: center; aspect-ratio: 3 / 4; font-family: var(--font-pixel); font-size: 44px; font-weight: 700; color: #fff3c4;
+  background: linear-gradient(#f6a630, #d97a14); text-shadow: 3px 3px 0 #7a3c06; }
+.np-info { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.np-info h2 { margin: 0; font-family: var(--font-pixel); font-weight: 600; font-size: 21px; line-height: 1.15; text-wrap: balance; overflow-wrap: anywhere; }
+.cat { margin: 0; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.stats { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 4px 0 0; font-size: 13px; }
+.stats dt { color: var(--muted); }
+.stats dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.time { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.place { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-pixel); font-weight: 600; }
+.medal { width: 11px; height: 11px; border-radius: 50%; background: var(--muted); flex: none; }
+.medal.p1 { background: var(--gold); box-shadow: 0 0 8px var(--gold); } .medal.p2 { background: var(--silver); } .medal.p3 { background: var(--bronze); }
+.note { font-size: 12px; color: var(--muted); margin: 0; }
+.links { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; }
+.empty { color: var(--muted); font-size: 13px; margin: 0; }
+.recent { border-top: 1px solid var(--edge); padding-top: 10px; }
+.recent summary { cursor: pointer; font-family: var(--font-pixel); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.history { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; max-height: 30vh; overflow: auto; }
+.history li { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; padding: 6px 0; border-top: 1px solid rgba(148,128,255,.15); font-size: 12px; align-items: baseline; }
+.history .hp { font-family: var(--font-pixel); font-weight: 600; color: var(--muted); }
+.history .hg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history .ht { font-family: var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+kbd { font-family: var(--font-mono); font-size: 11px; border: 1px solid var(--edge); border-radius: 4px; padding: 0 4px; }
+
+@media (max-width: 700px) {
+  .logo { height: 81px; }
+  .controls { margin-left: 0; }
+  .np { left: 16px; right: 16px; width: auto; max-height: 45vh; }
+  .case { width: 72px; }
+  .np-info h2 { font-size: 18px; }
+}
+/* The cats sit somewhere on the floor right of Spencer, picked at random on each load (see placeKitties).
+   Script sets left (centre), bottom and width; cats further back are drawn smaller. */
+.kitty { position: absolute; z-index: 2; pointer-events: none; translate: -50% 0; }
+.kitty.flip { transform: scaleX(-1); }
+.kitty::before { content: ""; position: absolute; left: 10%; right: 4%; bottom: -4%; height: 18%;
+  background: radial-gradient(closest-side, rgba(0,0,0,.55), transparent); }
+.kitty .rig { position: relative; transform-origin: 60% 100%; animation: catbreathe 2.7s ease-in-out infinite, catshift 13s ease-in-out infinite; }
+.kitty img { display: block; width: 100%; height: auto; }
+@keyframes catbreathe { 0%, 100% { scale: 1 1; } 50% { scale: 1.008 1.018; } }
+@keyframes catshift {
+  0%, 70%, 100% { rotate: 0deg; }
+  75%, 84% { rotate: -1.4deg; }
+  89% { rotate: .5deg; }
+}
+@media (prefers-reduced-motion: reduce) { .kitty .rig { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .spencer .rig, .onair.on, .spin, .wall-sign.on, .glow, .backlight, .floorstrip { animation: none; } }
+</style>
+</head>
+<body>
+<div class="tv">
+  <div class="lights" aria-hidden="true">
+    <div class="backlight"></div>
+    <div class="floorstrip"></div>
+    <div class="glow lantern floor"></div>
+    <div class="glow lantern shelf"></div>
+    <div class="glow qblock-light"></div>
+    <div class="glow triforce"></div>
+  </div>
+  <div class="screen">
+    <div id="stage"></div>
+    <div id="slate" class="slate">
+      <strong>Pick a platform and press Start</strong>
+      <span>You'll get the best-placed run with a YouTube or Twitch video, for a random game and category on that platform. When it ends, the next one starts.</span>
+    </div>
+  </div>
+  <div id="wallcover" class="wall-cover" hidden><img alt=""></div>
+  <div id="wallsign" class="wall-sign" aria-hidden="true"><span>NOW</span><span>PLAYING</span></div>
+  <div id="spencer" class="spencer" role="img" aria-label="Spencer, in his gaming chair, playing the run on screen">
+    <div class="rig"><img src="spencer.png?v=recliner" alt=""></div>
+  </div>
+  <div class="kitty" role="img" aria-label="Spencer's ginger cat, watching the TV">
+    <div class="rig"><img src="kitty.webp" alt=""></div>
+  </div>
+  <div class="kitty" role="img" aria-label="Spencer's black and white cat, watching the TV">
+    <div class="rig"><img src="kitty2.webp" alt=""></div>
+  </div>
+</div>
+
+<header class="hud">
+  <h1 class="brand"><img class="logo" src="logo.webp" alt="Spencer's Game Room" width="900" height="371"><span id="onair" class="onair" title="On air" aria-hidden="true"></span></h1>
+  <div class="controls">
+    <select id="platform" disabled aria-label="Platform"><option>Loading platforms…</option></select>
+    <button id="randplat" class="btn" disabled title="Pick a random platform and start watching">Random platform</button>
+    <button id="start" class="btn primary" disabled>Start watching</button>
+    <button id="nextplace" class="btn" disabled title="Play the next-placed run on this leaderboard. Shortcut: P">Next place</button>
+    <button id="skip" class="btn" disabled title="Roll a new game and category. Shortcut: N">Next run</button>
+    <details class="settings">
+      <summary class="btn" title="Settings">Settings</summary>
+      <div class="menu">
+        <label class="check"><input id="misc" type="checkbox" checked> Include misc. categories</label>
+        <label class="check"><input id="romhacks" type="checkbox"> Include ROM hacks and mods</label>
+        <label class="check"><input id="fangames" type="checkbox"> Include fan games</label>
+        <label class="check"><input id="showspencer" type="checkbox" checked> Show Spencer</label>
+      </div>
+    </details>
+  </div>
+  <div id="status" class="status" role="status" aria-live="polite"></div>
+</header>
+
+<aside class="np" aria-label="Now playing">
+  <p class="np-label"><span class="medal p1" aria-hidden="true"></span>Now playing</p>
+  <div id="now" class="np-main">
+    <div class="case"><div class="qblock" aria-hidden="true">?</div></div>
+    <div class="np-info">
+      <h2>Nothing yet</h2>
+      <p class="empty">Pick a platform and press Start. Press <kbd>P</kbd> for the next place on a leaderboard, <kbd>N</kbd> for a new game.</p>
+    </div>
+  </div>
+  <details class="recent" id="recent" hidden>
+    <summary>Recently played</summary>
+    <ul id="history" class="history"></ul>
+  </details>
+</aside>
+
+<script>
+'use strict';
+const API = 'https://www.speedrun.com/api/v1';
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const randInt = (n) => Math.floor(Math.random() * n);
+const shuffle = (a) => { for (let i = a.length - 1; i > 0; i--) { const j = randInt(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const store = {
+  get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+/* ---------- speedrun.com API (throttled to stay under 100 requests/minute) ---------- */
+let nextSlot = 0;
+async function api(path, tries = 4) {
+  const wait = Math.max(0, nextSlot - Date.now());
+  nextSlot = Date.now() + wait + 650;
+  if (wait) await sleep(wait);
+  let res;
+  try { res = await fetch(API + path); } catch (e) { res = null; }
+  if (!res || res.status === 420 || res.status === 429 || res.status >= 500) {
+    if (tries > 0) { await sleep(res ? 6000 : 2000); return api(path, tries - 1); }
+    throw new Error(res ? `speedrun.com is busy (HTTP ${res.status}). Try again in a minute.` : 'Could not reach speedrun.com. Check your connection.');
+  }
+  if (!res.ok) { const err = new Error(`speedrun.com returned HTTP ${res.status}`); err.status = res.status; throw err; }
+  return res.json();
+}
+
+async function loadPlatforms() {
+  const cached = store.get('sr.platforms');
+  if (cached && Date.now() - cached.at < 7 * 864e5) return cached.list;
+  const list = [];
+  for (let off = 0; ; off += 200) {
+    const page = await api(`/platforms?max=200&offset=${off}`);
+    list.push(...page.data.map((p) => ({ id: p.id, name: p.name })));
+    if (page.data.length < 200) break;
+  }
+  list.sort((a, b) => a.name.localeCompare(b.name));
+  store.set('sr.platforms', { at: Date.now(), list });
+  return list;
+}
+
+// Number of games on a platform. The API has no total, so probe offsets.
+async function countGames(pid, filter) {
+  const key = 'sr.count.' + pid + filter, cached = store.get(key);
+  if (cached && Date.now() - cached.at < 864e5) return cached.n;
+  const exists = async (i) => (await api(`/games?platform=${pid}${filter}&_bulk=yes&max=1&offset=${i}`)).data.length > 0;
+  const first = await api(`/games?platform=${pid}${filter}&_bulk=yes&max=1000`);
+  let n = first.data.length;
+  if (n === 1000) {
+    let lo = 999, hi = 2000;
+    while (await exists(hi)) { lo = hi; hi *= 2; }
+    while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (await exists(mid)) lo = mid; else hi = mid; }
+    n = hi;
+  }
+  store.set(key, { at: Date.now(), n });
+  return n;
+}
+
+/* ---------- video links ---------- */
+function parseTime(t) {
+  if (!t) return null;
+  t = String(t).trim();
+  if (/^\d+(\.\d+)?s?$/.test(t)) return Math.floor(parseFloat(t));
+  const m = t.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/i);
+  if (m && (m[1] || m[2] || m[3])) return (+m[1] || 0) * 3600 + (+m[2] || 0) * 60 + (+m[3] || 0);
+  const c = t.split(':').map(Number);
+  if (c.length > 1 && c.every((x) => !isNaN(x))) return c.reduce((a, x) => a * 60 + x, 0);
+  return null;
+}
+function parseVideo(raw) {
+  let u;
+  try { u = new URL(/^https?:\/\//i.test(raw) ? raw.trim() : 'https://' + raw.trim()); } catch { return null; }
+  const host = u.hostname.toLowerCase().replace(/^(www|m|go|music)\./, '');
+  const hashT = new URLSearchParams(u.hash.slice(1)).get('t');
+  const start = parseTime(u.searchParams.get('t') || u.searchParams.get('start') || hashT);
+  if (host === 'youtu.be' || host === 'youtube.com' || host === 'youtube-nocookie.com') {
+    const id = host === 'youtu.be' ? u.pathname.split('/')[1]
+      : u.searchParams.get('v') || (u.pathname.match(/^\/(?:embed|live|shorts|v)\/([\w-]{11})/) || [])[1];
+    if (id && /^[\w-]{11}$/.test(id)) return { kind: 'youtube', id, start, url: u.href };
+  }
+  if (host === 'twitch.tv') {
+    let m = u.pathname.match(/^\/(?:videos|[\w]+\/(?:v|video))\/(\d+)/);
+    if (m) return { kind: 'twitch', id: m[1], start, url: u.href };
+    m = u.pathname.match(/^\/[\w]+\/clip\/([\w-]+)/);
+    if (m) return { kind: 'clip', id: m[1], start: null, url: u.href };
+  }
+  if (host === 'clips.twitch.tv') {
+    const id = u.searchParams.get('clip') || u.pathname.split('/').filter(Boolean)[0];
+    if (id && id !== 'embed') return { kind: 'clip', id, start: null, url: u.href };
+  }
+  return null;
+}
+function runVideo(run) {
+  for (const l of run.videos?.links || []) { const v = parseVideo(l.uri || ''); if (v) return v; }
+  return null;
+}
+
+/* ---------- picking a run ---------- */
+// speedrun.com's "Fangame" game type. The API can only include a game type, not exclude one,
+// so fan games are skipped after the game is rolled.
+const FANGAME = 'd91jd1ex';
+
+// Series that are collections of hacks, mods or fan games, e.g. "Super Mario 64 ROM Hacks",
+// "Crash Bandicoot Mods", "Sonic Fan Games". Many games in them aren't tagged as ROM hacks or fan
+// games, so they're also skipped by series. The API has no list of every series, so search a few
+// keywords and keep the names that match. Cached for a week.
+const HACK_SERIES = /\bROM Hacks\b|\bHacks\b|\bMods\b|Custom Content/i;
+const FAN_SERIES = /Fan ?games/i;
+async function loadBlockedSeries() {
+  const cached = store.get('sr.blockedSeries');
+  if (cached && Date.now() - cached.at < 7 * 864e5) return { hack: new Set(cached.hack), fan: new Set(cached.fan) };
+  const hack = new Set(), fan = new Set();
+  for (const term of ['hack', 'mod', 'fan', 'custom']) {
+    const page = await api(`/series?name=${term}&max=200`);
+    for (const sr of page.data) {
+      const name = sr.names.international;
+      if (FAN_SERIES.test(name)) fan.add(sr.id);
+      else if (HACK_SERIES.test(name)) hack.add(sr.id);
+    }
+  }
+  store.set('sr.blockedSeries', { at: Date.now(), hack: [...hack], fan: [...fan] });
+  return { hack, fan };
+}
+let blockedSeries = null;
+const getBlockedSeries = () => (blockedSeries ||= loadBlockedSeries().catch(() => { blockedSeries = null; return { hack: new Set(), fan: new Set() }; }));
+const gameSeries = (g) => (g.links || []).filter((l) => l.rel === 'series').map((l) => l.uri.split('/').pop());
+async function pickRun(pid, filter, count, includeMisc, onProgress) {
+  let boards = 0;
+  const tries = Math.min(30, Math.max(6, count * 2));
+  for (let attempt = 0; attempt < tries; attempt++) {
+    const g = (await api(`/games?platform=${pid}${filter}&max=1&offset=${randInt(count)}&embed=categories.variables`)).data[0];
+    if (!g) continue;
+    if (!$('fangames').checked && (g.gametypes || []).includes(FANGAME)) continue;
+    const series = gameSeries(g), blocked = await getBlockedSeries();
+    if (!$('romhacks').checked && series.some((id) => blocked.hack.has(id))) continue;
+    if (!$('fangames').checked && series.some((id) => blocked.fan.has(id))) continue;
+    const cats = shuffle((g.categories?.data || []).filter((c) => c.type === 'per-game' && (includeMisc || !c.miscellaneous)));
+    for (const c of cats.slice(0, 3)) {
+      const subs = (c.variables?.data || [])
+        .filter((v) => v['is-subcategory'] && ['global', 'full-game'].includes(v.scope?.type) && (!v.category || v.category === c.id))
+        .map((v) => {
+          const ids = Object.keys(v.values?.values || {});
+          if (!ids.length) return null;
+          const id = ids[randInt(ids.length)];
+          return { varId: v.id, valueId: id, label: v.values.values[id].label };
+        }).filter(Boolean);
+      const qs = subs.map((s) => `&var-${s.varId}=${s.valueId}`).join('');
+      onProgress?.(++boards, g.names.international);
+      let lb;
+      try { lb = (await api(`/leaderboards/${g.id}/category/${c.id}?platform=${pid}&top=100&embed=players${qs}`)).data; }
+      catch (e) { if (e.status) continue; throw e; }
+      const runs = lb.runs.map((r) => ({ place: r.place, run: r.run, video: runVideo(r.run) }));
+      const cands = runs.filter((r) => r.video);
+      if (!cands.length) continue;
+      const people = new Map();
+      for (const p of lb.players?.data || []) people.set(p.rel === 'guest' ? 'g:' + p.name : p.id, p);
+      return { game: g, category: c, subs, runs, cands, idx: 0, people, unavailable: [], skipped: [] };
+    }
+  }
+  throw new Error(`Could not find a run with a YouTube or Twitch video after ${tries} tries. This platform may have very few runs.`);
+}
+
+/* ---------- formatting ---------- */
+function fmtTime(sec) {
+  if (sec == null) return '—';
+  const ms = Math.round((sec % 1) * 1000), s = Math.floor(sec);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+  const core = (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(r).padStart(2, '0');
+  return ms ? core + '.' + String(ms).padStart(3, '0') : core;
+}
+const ordinal = (n) => n + (['th', 'st', 'nd', 'rd'][(n % 100 - 20) % 10] || ['th', 'st', 'nd', 'rd'][n % 100] || 'th');
+const twitchTime = (s) => `${Math.floor(s / 3600)}h${Math.floor((s % 3600) / 60)}m${s % 60}s`;
+function runnerNames(pick, run) {
+  return (run.players || []).map((p) => {
+    const d = pick.people.get(p.rel === 'guest' ? 'g:' + p.name : p.id);
+    return d?.names?.international || d?.name || p.name || 'Unknown runner';
+  }).join(', ');
+}
+const sourceName = { youtube: 'YouTube', twitch: 'Twitch', clip: 'Twitch clip' };
+
+/* ---------- players ---------- */
+let ytReady, twReady;
+function loadScript(src) {
+  return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('Could not load ' + src)); document.head.appendChild(s); });
+}
+function ensureYT() {
+  ytReady ||= new Promise((res, rej) => { window.onYouTubeIframeAPIReady = res; loadScript('https://www.youtube.com/iframe_api').catch(rej); });
+  return ytReady;
+}
+function ensureTwitch() { twReady ||= loadScript('https://player.twitch.tv/js/embed/v1.js'); return twReady; }
+
+let session = 0;       // bumps on every new video so stale callbacks are ignored
+let player = null;     // { kind, obj }
+let timers = [];
+function clearPlayer() {
+  timers.forEach(clearInterval); timers = [];
+  try { if (player?.kind === 'youtube') player.obj.destroy(); } catch {}
+  player = null;
+  $('stage').innerHTML = '';
+  document.querySelector('.screen').classList.remove('flat');
+}
+
+async function playVideo(pick) {
+  const my = ++session;
+  clearPlayer();
+  const c = pick.cands[pick.idx], v = c.video, runtime = c.run.times?.primary_t;
+  const alive = () => my === session;
+  let started = false;
+  // Players can report "playing" and then stall (Twitch even jumps its position ahead while frozen),
+  // so only count a video as started once its position has moved forward on two separate checks.
+  let lastPos = null, advances = 0;
+  const onStart = () => setStatus('');
+  const onDead = () => { if (alive()) videoUnavailable(pick); };
+  document.querySelector('.screen').classList.toggle('flat', v.kind !== 'youtube');
+  const target = document.createElement('div');
+  $('stage').appendChild(target);
+  $('slate').hidden = true;
+  renderNow(pick);
+
+  // When the link points at a timestamp inside a longer video, stop once the run is over.
+  const capAt = v.start != null && runtime ? v.start + runtime + 30 : null;
+  const watch = (getTime) => {
+    timers.push(setInterval(() => {
+      if (!alive()) return;
+      let pos;
+      try { pos = getTime(); } catch { return; }
+      if (typeof pos !== 'number' || isNaN(pos)) return;
+      if (lastPos != null && pos > lastPos + .3) advances++;
+      lastPos = pos;
+      if (!started && advances >= 2) { started = true; setStatus(''); }
+      if (capAt != null && pos >= capAt) advance('run finished');
+    }, 1000));
+  };
+  // A video that never starts is usually deleted, private, or behind a Twitch
+  // content-classification gate that embedded players can't get past. Twitch may play an ad
+  // (up to about 30s) before the video, so it gets longer before we give up on it.
+  timers.push(setTimeout(() => { if (alive() && !started) onDead(); }, v.kind === 'twitch' ? 45000 : 20000));
+  if (v.kind === 'twitch') timers.push(setTimeout(() => {
+    if (alive() && !started) setStatus('Waiting for Twitch to start the video. It may be showing an ad first.', false, true);
+  }, 6000));
+
+  try {
+    if (v.kind === 'youtube') {
+      await ensureYT(); if (!alive()) return;
+      const obj = new YT.Player(target, {
+        videoId: v.id, width: '100%', height: '100%',
+        playerVars: { autoplay: 1, start: v.start || 0, rel: 0, playsinline: 1 },
+        events: {
+          onReady: (e) => e.target.playVideo(),
+          onStateChange: (e) => {
+            if (!alive()) return;
+            if (e.data === YT.PlayerState.PLAYING) onStart();
+            if (e.data === YT.PlayerState.ENDED) advance('ended');
+          },
+          onError: onDead,
+        },
+      });
+      player = { kind: 'youtube', obj };
+      watch(() => obj.getCurrentTime());
+    } else if (v.kind === 'twitch') {
+      await ensureTwitch(); if (!alive()) return;
+      target.id = 'tw-' + my;
+      const opts = { video: v.id, parent: [location.hostname], autoplay: true, muted: false, width: '100%', height: '100%' };
+      if (v.start) opts.time = twitchTime(v.start);
+      const obj = new Twitch.Player(target.id, opts);
+      obj.addEventListener(Twitch.Player.PLAYING, () => alive() && onStart());
+      obj.addEventListener(Twitch.Player.ENDED, () => alive() && advance('ended'));
+      obj.addEventListener(Twitch.Player.PLAYBACK_BLOCKED, () => { if (alive() && !started) setStatus('Twitch is blocking this video. Press play on it, or the next placing run starts shortly.'); });
+      player = { kind: 'twitch', obj };
+      watch(() => obj.getCurrentTime());
+    } else {
+      // Clips have no player API, so give them their maximum length (60s) and move on.
+      const f = document.createElement('iframe');
+      f.src = `https://clips.twitch.tv/embed?clip=${encodeURIComponent(v.id)}&parent=${location.hostname}&autoplay=true`;
+      f.allow = 'autoplay; fullscreen'; f.allowFullscreen = true;
+      target.replaceWith(f);
+      started = true;
+      player = { kind: 'clip', obj: f };
+      timers.push(setTimeout(() => alive() && advance('ended'), 62000));
+    }
+  } catch (e) { setStatus(e.message, true); }
+}
+
+function videoUnavailable(pick, manual = false) {
+  const c = pick.cands[pick.idx];
+  (manual ? pick.skipped : pick.unavailable).push(c.place);
+  if (pick.idx + 1 < pick.cands.length) {
+    pick.idx++;
+    setStatus(manual ? `Skipped the ${ordinal(c.place)}-place video.` : `The ${ordinal(c.place)}-place video wouldn't play. Trying the next placing run…`);
+    playVideo(pick);
+  } else {
+    setStatus(manual ? 'That was the last video on this leaderboard. Moving on…' : 'No working video on this leaderboard. Moving on…');
+    advance('unavailable');
+  }
+}
+
+/* ---------- the channel ---------- */
+const state = { platforms: [], pid: null, filter: '', count: 0, current: null, upcoming: null, token: 0, running: false, rolled: false, rerolls: 0 };
+
+// Some platforms have almost no runs with video. When the platform was rolled at random,
+// quietly roll another one instead of stopping on an error.
+function randomPlatform(fresh = true) {
+  if (fresh) state.rerolls = 0;
+  const opts = state.platforms.filter((p) => p.id !== state.pid);
+  $('platform').value = opts[randInt(opts.length)].id;
+  start(true);
+}
+function rerollAfterFailure(name) {
+  if (!state.rolled || state.current || state.rerolls >= 6) return false;
+  state.rerolls++;
+  setStatus(`${name} has no playable runs. Rolling another platform…`, false, true);
+  randomPlatform(false);
+  return true;
+}
+
+function setStatus(msg, err = false, busy = false) {
+  const el = $('status');
+  el.className = 'status' + (err ? ' err' : '');
+  el.innerHTML = (busy ? '<span class="spin" aria-hidden="true"></span>' : '') + esc(msg);
+}
+
+function prefetch() {
+  const t = state.token, { pid, filter, count } = state;
+  const misc = $('misc').checked;
+  state.upcoming = pickRun(pid, filter, count, misc).then((p) => (t === state.token ? p : null));
+  state.upcoming.catch(() => {});
+}
+
+async function advance(reason) {
+  if (!state.running) return;
+  const t = state.token;
+  if (state.current && reason !== 'unavailable') pushHistory(state.current);
+  ++session; clearPlayer();
+  $('slate').hidden = false;
+  $('slate').innerHTML = '<strong>Finding the next run…</strong><span>Rolling a random game and category.</span>';
+  setStatus('Finding the next run…', false, true);
+  try {
+    let pick = state.upcoming ? await state.upcoming : null;
+    if (t !== state.token) return;
+    if (!pick) {
+      pick = await pickRun(state.pid, state.filter, state.count, $('misc').checked, (n, name) => {
+        if (t === state.token) setStatus(`Checking ${name} (leaderboard ${n})…`, false, true);
+      });
+    }
+    if (t !== state.token) return;
+    state.current = pick;
+    setStatus('');
+    playVideo(pick);
+    prefetch();
+  } catch (e) {
+    if (t !== state.token) return;
+    state.upcoming = null;
+    if (rerollAfterFailure(state.platforms.find((x) => x.id === state.pid)?.name || 'That platform')) return;
+    setStatus(e.message, true);
+    $('slate').innerHTML = `<strong>Couldn't find a run</strong><span>${esc(e.message)}</span>`;
+  }
+}
+
+async function start(rolled = false) {
+  const p = state.platforms.find((x) => x.id === $('platform').value);
+  if (!p) { setStatus('Choose a platform from the list.', true); return; }
+  store.set('sr.lastPlatform', p.name);
+  state.token++; state.running = false; state.current = null; state.upcoming = null; state.rolled = rolled;
+  ++session; clearPlayer();
+  $('slate').hidden = false;
+  $('slate').innerHTML = `<strong>Tuning in to ${esc(p.name)}</strong><span>Counting games on this platform…</span>`;
+  $('skip').disabled = true; $('nextplace').disabled = true;
+  const t = state.token;
+  setStatus(`Counting ${p.name} games…`, false, true);
+  try {
+    const filter = $('romhacks').checked ? '' : '&romhack=false';
+    const count = await countGames(p.id, filter);
+    if (t !== state.token) return;
+    if (!count) throw new Error(`speedrun.com has no ${filter ? 'non-ROM-hack ' : ''}games listed for ${p.name}.`);
+    Object.assign(state, { pid: p.id, filter, count, running: true });
+    $('onair').classList.add('on'); $('wallsign').classList.add('on');
+    $('skip').disabled = false; $('nextplace').disabled = false;
+    $('start').textContent = 'Restart';
+    $('platform').title = `${count.toLocaleString()} games`;
+    advance('start');
+  } catch (e) {
+    if (t !== state.token) return;
+    if (rerollAfterFailure(p.name)) return;
+    setStatus(e.message, true);
+    $('slate').innerHTML = `<strong>Couldn't start</strong><span>${esc(e.message)}</span>`;
+  }
+}
+
+function renderNow(pick) {
+  const c = pick.cands[pick.idx], g = pick.game, run = c.run;
+  const pname = state.platforms.find((p) => p.id === state.pid)?.name || '';
+  const above = pick.runs.filter((r) => r.place < c.place);
+  const noVideo = above.filter((r) => !r.video).map((r) => ordinal(r.place));
+  const dead = pick.unavailable.map(ordinal), skipped = pick.skipped.map(ordinal);
+  const notes = [];
+  if (noVideo.length) notes.push(`${listJoin(noVideo)} place ${noVideo.length > 1 ? 'have' : 'has'} no YouTube or Twitch video.`);
+  if (skipped.length) notes.push(`You skipped ${listJoin(skipped)} place.`);
+  if (dead.length) notes.push(`${listJoin(dead)} place ${dead.length > 1 ? 'videos' : 'video'} wouldn't play here.`);
+  const cover = g.assets?.['cover-large']?.uri || g.assets?.['cover-medium']?.uri;
+  setWallCover(cover);
+  $('now').innerHTML = `
+    <div class="case">${cover ? `<img src="${esc(cover)}" alt="${esc(g.names.international)} cover">` : '<div class="qblock" aria-hidden="true">?</div>'}</div>
+    <div class="np-info">
+      <h2><a href="${esc(g.weblink)}" target="_blank" rel="noopener">${esc(g.names.international)}</a></h2>
+      <p class="cat">${esc(catPath(pick))}${g.released ? ' · ' + g.released : ''}</p>
+    <dl class="stats">
+      <dt>Place</dt><dd><span class="place"><span class="medal p${c.place}"></span>${ordinal(c.place)}</span> on ${esc(pname)} <span style="color:var(--muted)">of ${pick.runs.length}${pick.runs.length >= 100 ? '+' : ''}</span></dd>
+      <dt>Runner</dt><dd>${esc(runnerNames(pick, run))}</dd>
+      <dt>Time</dt><dd class="time">${fmtTime(run.times?.primary_t)}</dd>
+      <dt>Date</dt><dd>${esc(run.date || '—')}</dd>
+      <dt>Video</dt><dd>${sourceName[c.video.kind]}</dd>
+    </dl>
+    ${notes.length ? `<p class="note">${esc(notes.join(' '))}</p>` : ''}
+    <div class="links">
+      <a href="${esc(run.weblink)}" target="_blank" rel="noopener">Run on speedrun.com</a>
+      <a href="${esc(c.video.url)}" target="_blank" rel="noopener">Open on ${sourceName[c.video.kind]}</a>
+    </div>
+    </div>`;
+}
+// Show the game's cover on the wall poster. Swap it in only once it has loaded, so the old cover
+// never flashes blank; if it fails, the room's original poster shows through.
+let coverToken = 0;
+function setWallCover(url) {
+  const my = ++coverToken, box = $('wallcover');
+  if (!url) { box.hidden = true; return; }
+  const img = new Image();
+  img.onload = () => { if (my === coverToken) { box.querySelector('img').src = url; box.hidden = false; } };
+  img.onerror = () => { if (my === coverToken) box.hidden = true; };
+  img.src = url;
+}
+const catPath = (pick) => [pick.category.name, ...pick.subs.map((s) => s.label)].join(' - ');
+function listJoin(a) { return a.length < 3 ? a.join(' and ') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1]; }
+
+function pushHistory(pick) {
+  const c = pick.cands[pick.idx];
+  const li = document.createElement('li');
+  li.innerHTML = `<span class="hp">${ordinal(c.place)}</span>
+    <a class="hg" href="${esc(c.run.weblink)}" target="_blank" rel="noopener" title="${esc(pick.game.names.international + ' · ' + catPath(pick))}">${esc(pick.game.names.international)} <span style="color:var(--muted)">· ${esc(catPath(pick))}</span></a>
+    <span class="ht">${fmtTime(c.run.times?.primary_t)}</span>`;
+  $('history').prepend(li);
+  while ($('history').children.length > 30) $('history').lastChild.remove();
+  $('recent').hidden = false;
+}
+
+/* ---------- boot ---------- */
+// Put each cat somewhere new on the rug each visit: right of Spencer's feet and left of where the
+// Now playing card covers the room on wide screens. Lower on screen = closer = bigger. Cats keep
+// enough distance that they never overlap, the closer one is drawn in front, and each sometimes faces
+// the other way.
+(function placeKitties() {
+  const spots = [];
+  for (const el of document.querySelectorAll('.kitty')) {
+    let spot;
+    for (let tries = 0; tries < 50; tries++) {
+      const depth = Math.random();           // 0 = back of the rug, 1 = front edge
+      spot = { depth, left: 52 + Math.random() * 28 };
+      if (spots.every((o) => Math.abs(o.left - spot.left) > 11)) break;
+    }
+    spots.push(spot);
+    Object.assign(el.style, {
+      left: spot.left + '%',                 // centre, % from the left
+      bottom: 20 - spot.depth * 17 + '%',    // % from the room's bottom edge
+      width: 7 + spot.depth * 3 + '%',       // % of the room's width
+      zIndex: spot.depth > .5 ? 3 : 2,
+    });
+    el.classList.toggle('flip', Math.random() < .5);
+    el.querySelector('.rig').style.animationDelay = `${-Math.random() * 3}s, ${-Math.random() * 13}s`;
+  }
+})();
+// Fit the room to the window, centred. The top bar may overlap the posters above the TV but never the
+// TV itself (Twitch won't play with anything over it), so push the room down, and shrink it if needed.
+const TV_TOP = 0.10;   // top of the TV's bezel glow, as a fraction of the room's height
+function layoutRoom() {
+  const tv = document.querySelector('.tv'), vw = innerWidth, vh = innerHeight;
+  const hudBottom = document.querySelector('.hud').getBoundingClientRect().bottom;
+  let h = Math.min(vw / 1.5, vh), top = (vh - h) / 2;
+  if (top + TV_TOP * h < hudBottom) {
+    h = Math.min(h, (vh - hudBottom) / (1 - TV_TOP));
+    top = Math.max((vh - h) / 2, hudBottom - TV_TOP * h);
+  }
+  const w = h * 1.5;
+  Object.assign(tv.style, { width: w + 'px', left: (vw - w) / 2 + 'px', top: top + 'px' });
+  tv.style.setProperty('--k', w / 1536);
+}
+addEventListener('resize', layoutRoom);
+new ResizeObserver(layoutRoom).observe(document.querySelector('.hud'));
+layoutRoom();
+$('start').addEventListener('click', () => start());
+$('randplat').addEventListener('click', () => randomPlatform());
+$('skip').addEventListener('click', () => advance('skipped'));
+$('nextplace').addEventListener('click', () => { if (state.running && state.current) videoUnavailable(state.current, true); });
+$('platform').addEventListener('change', () => { if (state.running) start(); });
+$('misc').addEventListener('change', () => { store.set('sr.misc', $('misc').checked); if (state.running) prefetch(); });
+$('fangames').addEventListener('change', () => { store.set('sr.fangames', $('fangames').checked); if (state.running) prefetch(); });
+$('showspencer').addEventListener('change', () => { $('spencer').hidden = !$('showspencer').checked; store.set('sr.spencer', $('showspencer').checked); });
+$('romhacks').addEventListener('change', () => { store.set('sr.romhacks', $('romhacks').checked); if (state.running) start(); });
+document.addEventListener('keydown', (e) => {
+  if (e.target.closest('input, select') || !state.running || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === 'n' || e.key === 'N') advance('skipped');
+  if ((e.key === 'p' || e.key === 'P') && state.current) videoUnavailable(state.current, true);
+});
+
+(async () => {
+  const misc = store.get('sr.misc'); if (misc != null) $('misc').checked = misc;
+  $('romhacks').checked = store.get('sr.romhacks') === true;
+  $('fangames').checked = store.get('sr.fangames') === true;
+  $('showspencer').checked = store.get('sr.spencer') !== false;
+  $('spencer').hidden = !$('showspencer').checked;
+  try {
+    state.platforms = await loadPlatforms();
+    $('platform').innerHTML = state.platforms.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+    const last = store.get('sr.lastPlatform') || 'Nintendo Entertainment System';
+    const sel = state.platforms.find((p) => p.name === last) || state.platforms.find((p) => p.name === 'Nintendo Entertainment System');
+    if (sel) $('platform').value = sel.id;
+    $('platform').disabled = false; $('start').disabled = false; $('randplat').disabled = false;
+  } catch (e) { setStatus(e.message, true); }
+})();
+</script>
+</body>
+</html>
