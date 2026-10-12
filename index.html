@@ -52,9 +52,33 @@ button, input, select { font: inherit; color: inherit; }
    screen sized by layout, not transforms: the display's bounding box (x 579-1341, y 110-536), with the
    corner that pokes past the angled bezel clipped off, raised above everything else in the room.
    YouTube keeps the warp. */
-.screen.flat { transform: none; left: 37.695%; top: 10.742%; width: 49.609%; height: 41.602%; z-index: 5;
+.tv.flat .screen { transform: none; left: 37.695%; top: 10.742%; width: 49.609%; height: 41.602%; z-index: 5;
   clip-path: polygon(0 8.216%, 100% 0, 100% 100%, 0 99.061%); }
 #stage, #stage > * , #stage iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+/* Framing: dragging an edge of the TV crops that side of the video. The video stays its natural shape:
+   #stage is enlarged and shifted by layout (never shrunk or transformed, which Twitch refuses) so the
+   framed part fills the screen, with black bars if its shape doesn't match. The four handles sit on the
+   bezel just outside the picture, warped with it (or placed around the flat Twitch screen), because
+   anything over the video stops Twitch from playing. Framing resets for each new video. */
+.edge { position: absolute; left: 0; top: 0; z-index: 6; transform-origin: 0 0; touch-action: none; }
+.edge::after { content: ""; position: absolute; border-radius: 3px; background: var(--gold); box-shadow: 0 0 10px var(--gold); opacity: 0; transition: opacity .15s; }
+.edge:hover::after, .edge.dragging::after { opacity: .85; }
+.edge-l, .edge-r { width: 34px; height: 426px; cursor: ew-resize; }
+.edge-t, .edge-b { width: 762px; height: 34px; cursor: ns-resize; }
+.edge-l::after, .edge-r::after { top: 10%; bottom: 10%; width: 4px; left: 15px; }
+.edge-t::after, .edge-b::after { left: 10%; right: 10%; height: 4px; top: 15px; }
+.edge-l { transform: scale(var(--k, .5)) matrix3d(0.838887657, -0.0591475361, 0, -0.000120143433, 0, 0.908450704, 0, 0, 0, 0, 1, 0, 579, 145, 0, 1) translate(-34px, 0); }
+.edge-r { transform: scale(var(--k, .5)) matrix3d(0.838887657, -0.0591475361, 0, -0.000120143433, 0, 0.908450704, 0, 0, 0, 0, 1, 0, 579, 145, 0, 1) translate(762px, 0); }
+.edge-t { transform: scale(var(--k, .5)) matrix3d(0.838887657, -0.0591475361, 0, -0.000120143433, 0, 0.908450704, 0, 0, 0, 0, 1, 0, 579, 145, 0, 1) translate(0, -34px); }
+.edge-b { transform: scale(var(--k, .5)) matrix3d(0.838887657, -0.0591475361, 0, -0.000120143433, 0, 0.908450704, 0, 0, 0, 0, 1, 0, 579, 145, 0, 1) translate(0, 426px); }
+.tv.flat .edge { transform: none; --t: max(12px, calc(var(--k, .5) * 34px)); }
+.tv.flat .edge-l { left: calc(37.695% - var(--t)); top: 10.742%; width: var(--t); height: 41.602%; }
+.tv.flat .edge-r { left: 87.305%; top: 10.742%; width: var(--t); height: 41.602%; }
+.tv.flat .edge-t { left: 37.695%; top: calc(10.742% - var(--t)); width: 49.609%; height: var(--t); }
+.tv.flat .edge-b { left: 37.695%; top: 52.344%; width: 49.609%; height: var(--t); }
+.tv.flat .edge-l::after, .tv.flat .edge-r::after { width: 2px; left: calc(50% - 1px); }
+.tv.flat .edge-t::after, .tv.flat .edge-b::after { height: 2px; top: calc(50% - 1px); }
+body.cropping #stage iframe { pointer-events: none; }
 .slate { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 2cqh; padding: 6cqw; color: var(--muted); font-size: 3cqw; line-height: 1.4;
   background: repeating-linear-gradient(0deg, transparent 0 3px, rgba(255,255,255,.018) 3px 4px); }
 .slate strong { font-family: var(--font-pixel); font-size: 6.5cqw; line-height: 1.1; color: var(--text); font-weight: 600; }
@@ -281,6 +305,10 @@ kbd { font-family: var(--font-mono); font-size: 11px; border: 1px solid var(--ed
       <span>You'll get the best-placed run with a YouTube or Twitch video, for a random game and category on that platform. When it ends, the next one starts.</span>
     </div>
   </div>
+  <div class="edge edge-l" data-side="l" title="Drag to crop the video. Double-click to reset."></div>
+  <div class="edge edge-r" data-side="r" title="Drag to crop the video. Double-click to reset."></div>
+  <div class="edge edge-t" data-side="t" title="Drag to crop the video. Double-click to reset."></div>
+  <div class="edge edge-b" data-side="b" title="Drag to crop the video. Double-click to reset."></div>
   <div id="wallcover" class="wall-cover" hidden><img alt=""></div>
   <div id="wallsign" class="wall-sign" aria-hidden="true"><span>NOW</span><span>PLAYING</span></div>
   <div id="spencer" class="spencer" role="img" aria-label="Spencer, in his gaming chair, playing the run on screen">
@@ -591,7 +619,54 @@ function clearPlayer() {
   try { if (player?.kind === 'youtube') player.obj.destroy(); } catch {}
   player = null;
   $('stage').innerHTML = '';
-  document.querySelector('.screen').classList.remove('flat');
+  document.querySelector('.tv').classList.remove('flat');
+  resetCrop();
+}
+
+/* ---------- framing ---------- */
+// How much of each side of the video is cropped away, as fractions of the video's width or height.
+const crop = { l: 0, t: 0, r: 0, b: 0 };
+function applyCrop() {
+  const vw = 1 - crop.l - crop.r, vh = 1 - crop.t - crop.b;
+  const s = Math.min(1 / vw, 1 / vh);           // enlarge until the framed part fills the screen one way
+  const st = $('stage').style;
+  st.width = st.height = s * 100 + '%';
+  st.left = ((1 - vw * s) / 2 - crop.l * s) * 100 + '%';
+  st.top = ((1 - vh * s) / 2 - crop.t * s) * 100 + '%';
+  // Mask off the cropped sides, so any spare room around the framed part is black, not more video.
+  const pct = (v) => +(v * 100).toFixed(3) + '%';
+  st.clipPath = crop.l || crop.t || crop.r || crop.b ? `inset(${pct(crop.t)} ${pct(crop.r)} ${pct(crop.b)} ${pct(crop.l)})` : '';
+}
+function resetCrop() { Object.assign(crop, { l: 0, t: 0, r: 0, b: 0 }); applyCrop(); }
+for (const el of document.querySelectorAll('.edge')) {
+  const side = el.dataset.side;
+  el.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    el.setPointerCapture(e.pointerId);
+    el.classList.add('dragging'); document.body.classList.add('cropping');
+    const box = document.querySelector('.screen').getBoundingClientRect();
+    let lastX = e.clientX, lastY = e.clientY;
+    const move = (ev) => {
+      // Moving an edge by some share of the screen trims that share of what's currently showing.
+      const dx = (ev.clientX - lastX) / box.width * (1 - crop.l - crop.r);
+      const dy = (ev.clientY - lastY) / box.height * (1 - crop.t - crop.b);
+      lastX = ev.clientX; lastY = ev.clientY;
+      const MIN = .15;                            // always keep at least 15% of the video each way
+      if (side === 'l') crop.l = Math.min(Math.max(crop.l + dx, 0), 1 - MIN - crop.r);
+      if (side === 'r') crop.r = Math.min(Math.max(crop.r - dx, 0), 1 - MIN - crop.l);
+      if (side === 't') crop.t = Math.min(Math.max(crop.t + dy, 0), 1 - MIN - crop.b);
+      if (side === 'b') crop.b = Math.min(Math.max(crop.b - dy, 0), 1 - MIN - crop.t);
+      applyCrop();
+    };
+    const end = () => {
+      el.classList.remove('dragging'); document.body.classList.remove('cropping');
+      el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', end); el.removeEventListener('pointercancel', end);
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
+  });
+  el.addEventListener('dblclick', resetCrop);
 }
 
 async function playVideo(pick) {
@@ -605,7 +680,7 @@ async function playVideo(pick) {
   let lastPos = null, advances = 0;
   const onStart = () => setStatus('');
   const onDead = () => { if (alive()) videoUnavailable(pick); };
-  document.querySelector('.screen').classList.toggle('flat', v.kind !== 'youtube');
+  document.querySelector('.tv').classList.toggle('flat', v.kind !== 'youtube');
   const target = document.createElement('div');
   $('stage').appendChild(target);
   $('slate').hidden = true;
